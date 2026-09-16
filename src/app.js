@@ -18,7 +18,11 @@ const app = express();
 app.use(helmet({ crossOriginResourcePolicy: false })); // allow externally hosted image URLs
 app.use(
   cors({
-    origin: process.env.CLIENT_URL || 'http://localhost:5173',
+   origin: [
+      'http://localhost:5173',
+      'https://zyphoriz.com',
+    ],
+    
     credentials: true,
   })
 );

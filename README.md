@@ -1,4 +1,4 @@
-# Nexora Backend
+# ZYPHORIZ Backend
 
 Express.js + MongoDB (Mongoose) API for the Nexora local business directory frontend.
 Replaces the frontend's `localStorage`-based `AuthContext` and `mockBusinesses.js` with a real database and JWT auth.
