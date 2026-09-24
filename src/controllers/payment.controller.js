@@ -182,8 +182,23 @@ const createOrder = asyncHandler(
       },
     };
 
-    const response =
-      await cashfree.PGCreateOrder(request);
+   let response;
+
+try {
+  response = await cashfree.PGCreateOrder(request);
+} catch (error) {
+  console.error('Cashfree order creation failed:', {
+    status: error.response?.status,
+    data: error.response?.data,
+    message: error.message,
+  });
+
+  throw new ApiError(
+    error.response?.status || 500,
+    error.response?.data?.message ||
+      'Unable to create Cashfree order'
+  );
+}
 
     const cashfreeOrder =
       response.data;
