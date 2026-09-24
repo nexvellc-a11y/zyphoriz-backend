@@ -64,6 +64,7 @@ const businessSchema = new mongoose.Schema(
 
     selectedPlan: { type: String, default: 'standard' },
     planPrice: { type: String, default: `₹${STANDARD_PLAN_PRICE}/yr` },
+    template: { type: String, default: 'classic', lowercase: true, trim: true },
     planExpiresAt: { type: Date },
 
     status: {

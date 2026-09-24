@@ -22,7 +22,7 @@ const createBusiness = asyncHandler(async (req, res) => {
     name, category, categoryId, phone, whatsapp, email, website,
     address, city, location, description,
     instagram, facebook, youtube, video,
-    openingHours, referralCode,
+    openingHours, referralCode, template,
   } = req.body;
 
   if (!name || !categoryId || !phone || !email || !address || !city || !description) {
@@ -77,6 +77,7 @@ const createBusiness = asyncHandler(async (req, res) => {
     gallery: galleryFiles.length ? galleryFiles.map((f) => f.url) : (req.body.gallery || []),
     selectedPlan: 'standard',
     planPrice: `₹${STANDARD_PLAN_PRICE}/yr`,
+    template: template || 'classic',
     status: 'pending_payment',
   });
 
@@ -154,7 +155,7 @@ const updateBusiness = asyncHandler(async (req, res) => {
   const updatable = [
     'name', 'category', 'categoryId', 'phone', 'whatsapp', 'email', 'website',
     'address', 'city', 'location', 'description',
-    'instagram', 'facebook', 'youtube', 'video',
+    'instagram', 'facebook', 'youtube', 'video', 'template',
   ];
   updatable.forEach((field) => {
     if (req.body[field] !== undefined) business[field] = req.body[field];

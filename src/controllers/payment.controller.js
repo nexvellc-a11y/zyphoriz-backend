@@ -1,144 +1,433 @@
 const asyncHandler = require('express-async-handler');
 const crypto = require('crypto');
+
 const Payment = require('../models/Payment');
 const Business = require('../models/Business');
 const User = require('../models/User');
+
 const ApiError = require('../utils/ApiError');
 const sendResponse = require('../utils/apiResponse');
+
+const { Cashfree } = require('cashfree-pg');
 const {
   REFERRAL_COMMISSION,
   STANDARD_PLAN_PRICE,
-  RAZORPAY_KEY_ID,
-  RAZORPAY_KEY_SECRET,
+  CASHFREE_CLIENT_ID,
+  CASHFREE_CLIENT_SECRET,
+  CASHFREE_ENV,
 } = require('../config/constants');
-const Razorpay = require('razorpay');
 
-const razorpay = RAZORPAY_KEY_ID && RAZORPAY_KEY_SECRET
-  ? new Razorpay({ key_id: RAZORPAY_KEY_ID, key_secret: RAZORPAY_KEY_SECRET })
-  : null;
 
-const generateTransactionId = () => `ZYP-${crypto.randomInt(10000000, 99999999)}`;
+const generateTransactionId = () =>
+  `ZYP-${crypto.randomInt(10000000, 99999999)}`;
 
-// Credits the configured commission to the referrer, once per referred user.
-const awardReferralCommission = async (referralCode, referredUserId) => {
+// --------------------------------------------------
+// Cashfree configuration
+// --------------------------------------------------
+
+const cashfree = new Cashfree(
+  CASHFREE_ENV === 'PRODUCTION'
+    ? Cashfree.PRODUCTION
+    : Cashfree.SANDBOX,
+  CASHFREE_CLIENT_ID,
+  CASHFREE_CLIENT_SECRET
+);
+
+// --------------------------------------------------
+// Referral commission
+// --------------------------------------------------
+
+const awardReferralCommission = async (
+  referralCode,
+  referredUserId
+) => {
   if (!referralCode) return;
 
-  const escapedCode = referralCode.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const escapedCode = referralCode
+    .trim()
+    .replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
   await User.findOneAndUpdate(
     {
-      referralCode: { $regex: `^${escapedCode}$`, $options: 'i' },
-      _id: { $ne: referredUserId },
-      referredUserIds: { $ne: referredUserId },
+      referralCode: {
+        $regex: `^${escapedCode}$`,
+        $options: 'i',
+      },
+
+      _id: {
+        $ne: referredUserId,
+      },
+
+      referredUserIds: {
+        $ne: referredUserId,
+      },
     },
     {
-      $inc: { referralEarnings: REFERRAL_COMMISSION, referralCount: 1 },
-      $addToSet: { referredUserIds: referredUserId },
+      $inc: {
+        referralEarnings: REFERRAL_COMMISSION,
+        referralCount: 1,
+      },
+
+      $addToSet: {
+        referredUserIds: referredUserId,
+      },
     }
   );
 };
 
-const getOwnedBusiness = async (businessId, userId) => {
+// --------------------------------------------------
+// Get owned business
+// --------------------------------------------------
+
+const getOwnedBusiness = async (
+  businessId,
+  userId
+) => {
   const business = await Business.findById(businessId);
-  if (!business) throw new ApiError(404, 'Business not found');
-  if (String(business.owner) !== String(userId)) {
-    throw new ApiError(403, 'You do not own this business listing');
+
+  if (!business) {
+    throw new ApiError(
+      404,
+      'Business not found'
+    );
   }
+
+  if (
+    String(business.owner) !==
+    String(userId)
+  ) {
+    throw new ApiError(
+      403,
+      'You do not own this business listing'
+    );
+  }
+
   if (business.status === 'active') {
-    throw new ApiError(400, 'This business listing is already active');
+    throw new ApiError(
+      400,
+      'This business listing is already active'
+    );
   }
+
   return business;
 };
 
-// @desc    Create a Razorpay order for a pending listing
-// @route   POST /api/v1/payments/order
-// @access  Private
-const createOrder = asyncHandler(async (req, res) => {
-  if (!razorpay) throw new ApiError(500, 'Razorpay is not configured on the server');
+// --------------------------------------------------
+// CREATE CASHFREE ORDER
+// --------------------------------------------------
 
-  const { businessId } = req.body;
-  await getOwnedBusiness(businessId, req.user._id);
+const createOrder = asyncHandler(
+  async (req, res) => {
 
-  const order = await razorpay.orders.create({
-    amount: Math.round(STANDARD_PLAN_PRICE * 100),
-    currency: 'INR',
-    receipt: `zyphoriz_${businessId}_${Date.now()}`,
-    notes: { businessId: String(businessId), userId: String(req.user._id) },
-  });
+    const { businessId } = req.body;
 
-  sendResponse(res, 201, {
-    order,
-    keyId: RAZORPAY_KEY_ID,
-    amount: STANDARD_PLAN_PRICE,
-    currency: 'INR',
-  }, 'Razorpay order created');
-});
+    if (!businessId) {
+      throw new ApiError(
+        400,
+        'Business ID is required'
+      );
+    }
 
-// @desc    Verify a Razorpay payment and activate the listing
-// @route   POST /api/v1/payments/checkout
-// @access  Private
-const checkout = asyncHandler(async (req, res) => {
-  const {
-    businessId,
-    method,
-    razorpay_order_id: razorpayOrderId,
-    razorpay_payment_id: razorpayPaymentId,
-    razorpay_signature: razorpaySignature,
-  } = req.body;
+    const business =
+      await getOwnedBusiness(
+        businessId,
+        req.user._id
+      );
 
-  if (!razorpay || !businessId || !['upi', 'card'].includes(method)
-    || !razorpayOrderId || !razorpayPaymentId || !razorpaySignature) {
-    throw new ApiError(400, 'Complete Razorpay payment details are required');
+    const orderId =
+      `zyphoriz_${businessId}_${Date.now()}`;
+
+    const request = {
+      order_id: orderId,
+
+      order_amount:
+        Number(STANDARD_PLAN_PRICE),
+
+      order_currency: 'INR',
+
+      customer_details: {
+        customer_id:
+          String(req.user._id),
+
+        customer_name:
+          req.user.name ||
+          business.name ||
+          'Zyphoriz Customer',
+
+        customer_email:
+          req.user.email,
+
+        customer_phone:
+          req.user.mobileNumber ||
+          req.user.phone ||
+          '9999999999',
+      },
+
+     order_meta: {
+  return_url:
+    `${process.env.FRONTEND_URL}/payment/callback?order_id=${encodeURIComponent(orderId)}`,
+  notify_url:
+    `${process.env.API_URL}/api/v1/payments/webhook`,
+},
+
+      order_note:
+        `Zyphoriz business activation - ${business.name}`,
+
+      order_tags: {
+        businessId:
+          String(business._id),
+
+        userId:
+          String(req.user._id),
+      },
+    };
+
+    const response =
+      await cashfree.PGCreateOrder(request);
+
+    const cashfreeOrder =
+      response.data;
+
+    sendResponse(
+      res,
+      201,
+      {
+        orderId:
+          cashfreeOrder.order_id,
+
+        cfOrderId:
+          cashfreeOrder.cf_order_id,
+
+        paymentSessionId:
+          cashfreeOrder.payment_session_id,
+
+        amount:
+          STANDARD_PLAN_PRICE,
+
+        currency: 'INR',
+
+        environment:
+          CASHFREE_ENV,
+      },
+      'Cashfree order created'
+    );
   }
+);
 
-  const business = await getOwnedBusiness(businessId, req.user._id);
-  const order = await razorpay.orders.fetch(razorpayOrderId);
-  if (order.status !== 'paid' && order.status !== 'attempted') {
-    throw new ApiError(400, 'Razorpay order is not valid for checkout');
+// --------------------------------------------------
+// VERIFY / COMPLETE CASHFREE PAYMENT
+// --------------------------------------------------
+
+const checkout = asyncHandler(
+  async (req, res) => {
+
+    const {
+      businessId,
+      orderId,
+    } = req.body;
+
+    if (!businessId || !orderId) {
+      throw new ApiError(
+        400,
+        'Business ID and Cashfree order ID are required'
+      );
+    }
+
+    const business =
+      await getOwnedBusiness(
+        businessId,
+        req.user._id
+      );
+
+    // Fetch order from Cashfree
+    const orderResponse =
+      await cashfree.PGFetchOrder(
+        orderId
+      );
+
+    const order =
+      orderResponse.data;
+
+    // Check order amount
+    if (
+      Number(order.order_amount) !==
+      Number(STANDARD_PLAN_PRICE)
+    ) {
+      throw new ApiError(
+        400,
+        'Cashfree order amount does not match'
+      );
+    }
+
+    // Check customer
+    if (
+      String(
+        order.customer_details?.customer_id
+      ) !== String(req.user._id)
+    ) {
+      throw new ApiError(
+        400,
+        'Cashfree order does not belong to this user'
+      );
+    }
+
+    // Cashfree order must be PAID
+    if (order.order_status !== 'PAID') {
+
+      throw new ApiError(
+        400,
+        `Payment not completed. Current status: ${order.order_status}`
+      );
+    }
+
+    // Check whether payment already exists
+    const existingPayment =
+      await Payment.findOne({
+        cashfreeOrderId: orderId,
+      });
+
+    if (existingPayment) {
+
+      return sendResponse(
+        res,
+        200,
+        {
+          payment: existingPayment,
+          business,
+        },
+        'Payment already processed'
+      );
+    }
+
+    // Fetch transactions
+    const paymentsResponse =
+      await cashfree.PGOrderFetchPayments(
+        orderId
+      );
+
+    const payments =
+      paymentsResponse.data;
+
+    const successfulPayment =
+      payments.find(
+        payment =>
+          payment.payment_status === 'SUCCESS'
+      );
+
+    if (!successfulPayment) {
+      throw new ApiError(
+        400,
+        'Successful Cashfree transaction not found'
+      );
+    }
+
+    // ------------------------------------------------
+    // Create payment record
+    // ------------------------------------------------
+
+    const payment =
+      await Payment.create({
+
+        user:
+          req.user._id,
+
+        business:
+          business._id,
+
+        transactionId:
+          generateTransactionId(),
+
+        cashfreeOrderId:
+          orderId,
+
+        cashfreePaymentId:
+          successfulPayment.cf_payment_id,
+
+        amount:
+          STANDARD_PLAN_PRICE,
+
+        method:
+          successfulPayment.payment_group,
+
+        plan:
+          business.selectedPlan,
+
+        status:
+          'success',
+      });
+
+    // ------------------------------------------------
+    // Activate business
+    // ------------------------------------------------
+
+    business.status = 'active';
+
+    business.verified = true;
+
+    business.planExpiresAt =
+      new Date(
+        Date.now() +
+        365 *
+        24 *
+        60 *
+        60 *
+        1000
+      );
+
+    await business.save();
+
+    // ------------------------------------------------
+    // Referral commission
+    // ------------------------------------------------
+
+    await awardReferralCommission(
+      business.referralCodeUsed,
+      req.user._id
+    );
+
+    sendResponse(
+      res,
+      200,
+      {
+        payment,
+        business,
+      },
+      'Payment successful, your business is now live'
+    );
   }
-  if (order.amount !== Math.round(STANDARD_PLAN_PRICE * 100)
-    || order.currency !== 'INR'
-    || order.notes?.businessId !== String(business._id)
-    || order.notes?.userId !== String(req.user._id)) {
-    throw new ApiError(400, 'Razorpay order does not match this business');
+);
+
+// --------------------------------------------------
+// PAYMENT HISTORY
+// --------------------------------------------------
+
+const getMyPayments = asyncHandler(
+  async (req, res) => {
+
+    const payments =
+      await Payment.find({
+        user: req.user._id,
+      })
+        .populate(
+          'business',
+          'name slug'
+        )
+        .sort({
+          createdAt: -1,
+        });
+
+    sendResponse(
+      res,
+      200,
+      {
+        payments,
+      }
+    );
   }
-  const expectedSignature = crypto
-    .createHmac('sha256', RAZORPAY_KEY_SECRET)
-    .update(`${razorpayOrderId}|${razorpayPaymentId}`)
-    .digest('hex');
-  const signaturesMatch = expectedSignature.length === razorpaySignature.length
-    && crypto.timingSafeEqual(Buffer.from(expectedSignature), Buffer.from(razorpaySignature));
-  if (!signaturesMatch) throw new ApiError(400, 'Razorpay payment verification failed');
+);
 
-  const payment = await Payment.create({
-    user: req.user._id,
-    business: business._id,
-    transactionId: generateTransactionId(),
-    razorpayOrderId,
-    razorpayPaymentId,
-    amount: STANDARD_PLAN_PRICE,
-    method,
-    plan: business.selectedPlan,
-    status: 'success',
-  });
-
-  business.status = 'active';
-  business.verified = true;
-  business.planExpiresAt = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000);
-  await business.save();
-
-  await awardReferralCommission(business.referralCodeUsed, req.user._id);
-
-  sendResponse(res, 200, { payment, business }, 'Payment successful, your business is now live');
-});
-
-// @desc    Get the logged-in user's payment history
-// @route   GET /api/v1/payments/mine
-// @access  Private
-const getMyPayments = asyncHandler(async (req, res) => {
-  const payments = await Payment.find({ user: req.user._id })
-    .populate('business', 'name slug')
-    .sort({ createdAt: -1 });
-  sendResponse(res, 200, { payments });
-});
-
-module.exports = { createOrder, checkout, getMyPayments };
+module.exports = {
+  createOrder,
+  checkout,
+  getMyPayments,
+};

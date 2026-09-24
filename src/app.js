@@ -15,14 +15,24 @@ const { notFound, errorHandler } = require('./middleware/error.middleware');
 const app = express();
 
 // ── Security & core middleware ──────────────────────────────────────────
-app.use(helmet({ crossOriginResourcePolicy: false })); // allow externally hosted image URLs
+app.use(helmet({ crossOriginResourcePolicy: false })); 
+const allowedOrigins = [
+  ...(process.env.CLIENT_URL || '').split(','),
+  'http://localhost:5173',
+  'https://zyphoriz.com',
+  'https://www.zyphoriz.com',
+  'https://zyphoriz.in',
+  'https://www.zyphoriz.in',
+]
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
 app.use(
   cors({
-   origin: [
-      'http://localhost:5173',
-      'https://zyphoriz.com',
-    ],
-    
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+      return callback(new Error('Origin is not allowed by CORS'));
+    },
     credentials: true,
   })
 );
