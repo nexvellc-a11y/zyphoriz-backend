@@ -21,6 +21,13 @@ const {
 const generateTransactionId = () =>
   `ZYP-${crypto.randomInt(10000000, 99999999)}`;
 
+const normalizePaymentMethod = (method) => {
+  const supportedMethods = [
+    'upi', 'card', 'netbanking', 'wallet', 'bank_transfer', 'other',
+  ];
+  return supportedMethods.includes(method) ? method : 'other';
+};
+
 // --------------------------------------------------
 // Cashfree configuration
 // --------------------------------------------------
@@ -248,11 +255,18 @@ const checkout = asyncHandler(
       );
     }
 
-    const business =
-      await getOwnedBusiness(
-        businessId,
-        req.user._id
+    const business = await Business.findById(businessId);
+
+    if (!business) {
+      throw new ApiError(404, 'Business not found');
+    }
+
+    if (String(business.owner) !== String(req.user._id)) {
+      throw new ApiError(
+        403,
+        'You do not own this business listing'
       );
+    }
 
     // Fetch order from Cashfree
     const orderResponse =
@@ -361,8 +375,9 @@ const checkout = asyncHandler(
         amount:
           STANDARD_PLAN_PRICE,
 
-        method:
-          successfulPayment.payment_group,
+        method: normalizePaymentMethod(
+          successfulPayment.payment_group
+        ),
 
         plan:
           business.selectedPlan,
@@ -412,6 +427,115 @@ const checkout = asyncHandler(
   }
 );
 
+const processPaidOrder = async (
+  orderId,
+  businessId,
+  userId
+) => {
+  const business = await Business.findById(businessId);
+
+  if (!business) {
+    throw new ApiError(404, 'Business not found');
+  }
+
+  if (String(business.owner) !== String(userId)) {
+    throw new ApiError(403, 'Payment owner does not match business owner');
+  }
+
+  const existingPayment = await Payment.findOne({
+    cashfreeOrderId: orderId,
+  });
+
+  if (existingPayment) {
+    return { payment: existingPayment, business };
+  }
+
+  const orderResponse = await cashfree.PGFetchOrder(orderId);
+  const order = orderResponse.data;
+
+  if (Number(order.order_amount) !== Number(STANDARD_PLAN_PRICE)) {
+    throw new ApiError(400, 'Cashfree order amount does not match');
+  }
+
+  if (order.order_status !== 'PAID') {
+    throw new ApiError(
+      400,
+      `Payment not completed. Current status: ${order.order_status}`
+    );
+  }
+
+  const paymentsResponse = await cashfree.PGOrderFetchPayments(orderId);
+  const successfulPayment = paymentsResponse.data.find(
+    (payment) => payment.payment_status === 'SUCCESS'
+  );
+
+  if (!successfulPayment) {
+    throw new ApiError(400, 'Successful Cashfree transaction not found');
+  }
+
+  const payment = await Payment.create({
+    user: userId,
+    business: business._id,
+    transactionId: generateTransactionId(),
+    cashfreeOrderId: orderId,
+    cashfreePaymentId: successfulPayment.cf_payment_id,
+    amount: STANDARD_PLAN_PRICE,
+    method: normalizePaymentMethod(successfulPayment.payment_group),
+    plan: business.selectedPlan,
+    status: 'success',
+  });
+
+  business.status = 'active';
+  business.verified = true;
+  business.planExpiresAt = new Date(
+    Date.now() + 365 * 24 * 60 * 60 * 1000
+  );
+  await business.save();
+
+  await awardReferralCommission(
+    business.referralCodeUsed,
+    userId
+  );
+
+  return { payment, business };
+};
+
+const webhook = asyncHandler(async (req, res) => {
+  const timestamp = req.get('x-webhook-timestamp');
+  const signature = req.get('x-webhook-signature');
+  const rawBody = req.rawBody || JSON.stringify(req.body);
+
+  if (!timestamp || !signature) {
+    throw new ApiError(400, 'Cashfree webhook signature is missing');
+  }
+
+  const expectedSignature = crypto
+    .createHmac('sha256', CASHFREE_CLIENT_SECRET)
+    .update(`${timestamp}${rawBody}`)
+    .digest('base64');
+
+  const signatureBuffer = Buffer.from(signature);
+  const expectedBuffer = Buffer.from(expectedSignature);
+
+  if (
+    signatureBuffer.length !== expectedBuffer.length ||
+    !crypto.timingSafeEqual(signatureBuffer, expectedBuffer)
+  ) {
+    throw new ApiError(401, 'Invalid Cashfree webhook signature');
+  }
+
+  const orderId = req.body?.data?.order?.order_id;
+  const orderStatus = req.body?.data?.order?.order_status;
+  const businessId = req.body?.data?.order?.order_tags?.businessId;
+  const userId = req.body?.data?.order?.order_tags?.userId;
+
+  if (orderStatus === 'PAID' && orderId && businessId && userId) {
+    await processPaidOrder(orderId, businessId, userId);
+  }
+
+  res.status(200).json({ success: true });
+});
+
 // --------------------------------------------------
 // PAYMENT HISTORY
 // --------------------------------------------------
@@ -444,5 +568,6 @@ const getMyPayments = asyncHandler(
 module.exports = {
   createOrder,
   checkout,
+  webhook,
   getMyPayments,
 };

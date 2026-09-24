@@ -36,7 +36,14 @@ app.use(
     credentials: true,
   })
 );
-app.use(express.json({ limit: '2mb' }));
+app.use(express.json({
+  limit: '2mb',
+  verify: (req, res, buffer) => {
+    if (req.originalUrl === '/api/v1/payments/webhook') {
+      req.rawBody = buffer.toString('utf8');
+    }
+  },
+}));
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
