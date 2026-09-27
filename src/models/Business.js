@@ -33,6 +33,14 @@ const businessSchema = new mongoose.Schema(
     categoryId: { type: String, required: true }, // e.g. "electronics"
 
     phone: { type: String, required: [true, 'Phone number is required'] },
+    additionalPhones: {
+      type: [String],
+      default: [],
+      validate: {
+        validator: (phones) => phones.length <= 2,
+        message: 'A maximum of two additional phone numbers is allowed',
+      },
+    },
     whatsapp: { type: String, default: '' },
     email: { type: String, required: [true, 'Email is required'] },
     website: { type: String, default: '' },

@@ -14,6 +14,49 @@ const deriveHours = (openingHours = []) =>
     .filter((row) => row.open)
     .map((row) => ({ day: row.day, time: `${row.from} - ${row.to}` }));
 
+const parseAdditionalPhones = (value) => {
+  if (
+    value === undefined ||
+    value === null ||
+    value === ''
+  ) {
+    return [];
+  }
+
+  let phones = value;
+
+  if (typeof phones === 'string') {
+    try {
+      phones = JSON.parse(phones);
+    } catch {
+      throw new ApiError(
+        400,
+        'Additional phone numbers must be a valid list'
+      );
+    }
+  }
+
+  if (!Array.isArray(phones)) {
+    throw new ApiError(
+      400,
+      'Additional phone numbers must be an array'
+    );
+  }
+
+  const cleanedPhones = phones
+    .map((phone) => String(phone ?? '').trim())
+    .filter(Boolean);
+
+  if (cleanedPhones.length > 2) {
+    throw new ApiError(
+      400,
+      'Only two additional contact numbers are allowed'
+    );
+  }
+
+  return cleanedPhones;
+};
+
 // @desc    Create a new business listing (starts as pending_payment)
 // @route   POST /api/v1/businesses
 // @access  Private
@@ -72,6 +115,7 @@ const createBusiness = asyncHandler(async (req, res) => {
     video,
     openingHours: parsedHours,
     hours: deriveHours(parsedHours),
+    additionalPhones: parseAdditionalPhones(req.body.additionalPhones),
     image: bannerFile ? bannerFile.url : (req.body.image || ''),
     coverImage: bannerFile ? bannerFile.url : (req.body.image || ''),
     gallery: galleryFiles.length ? galleryFiles.map((f) => f.url) : (req.body.gallery || []),
@@ -160,6 +204,10 @@ const updateBusiness = asyncHandler(async (req, res) => {
   updatable.forEach((field) => {
     if (req.body[field] !== undefined) business[field] = req.body[field];
   });
+
+  if (req.body.additionalPhones !== undefined) {
+    business.additionalPhones = parseAdditionalPhones(req.body.additionalPhones);
+  }
 
   if (req.body.openingHours) {
     const parsed = typeof req.body.openingHours === 'string'
