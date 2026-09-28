@@ -68,7 +68,7 @@ const createBusiness = asyncHandler(async (req, res) => {
     openingHours, referralCode, template,
   } = req.body;
 
-  if (!name || !categoryId || !phone || !email || !address || !city || !description) {
+  if (!name || !phone || !email || !address || !city || !description) {
     throw new ApiError(400, 'Please fill in all required business fields');
   }
 
@@ -99,8 +99,8 @@ const createBusiness = asyncHandler(async (req, res) => {
     referralCodeUsed: normalizedReferralCode || '',
     name,
     slug,
-    category,
-    categoryId,
+    category: category || '',
+    categoryId: categoryId || '',
     phone,
     whatsapp,
     email,

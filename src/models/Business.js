@@ -29,8 +29,8 @@ const businessSchema = new mongoose.Schema(
     name: { type: String, required: [true, 'Business name is required'], trim: true },
     slug: { type: String, required: true, unique: true, lowercase: true, trim: true, index: true },
 
-    category: { type: String, required: true }, // human readable name, e.g. "Electronics"
-    categoryId: { type: String, required: true }, // e.g. "electronics"
+    category: { type: String, default: '' }, // human readable name, e.g. "Electronics"
+    categoryId: { type: String, default: '' }, // e.g. "electronics"
 
     phone: { type: String, required: [true, 'Phone number is required'] },
     additionalPhones: {
