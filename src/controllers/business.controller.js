@@ -62,9 +62,9 @@ const parseAdditionalPhones = (value) => {
 // @access  Private
 const createBusiness = asyncHandler(async (req, res) => {
   const {
-    name, category, categoryId, phone, whatsapp, email, website,
+    slug: requestedSlug, name, category, categoryId, phone, whatsapp, email, website,
     address, city, location, description,
-    instagram, facebook, youtube, video,
+    instagram, facebook, telegram, youtube, video,
     openingHours, referralCode, template,
   } = req.body;
 
@@ -82,9 +82,10 @@ const createBusiness = asyncHandler(async (req, res) => {
     }
   }
 
-  let slug = toSlug(name);
+  const slug = toSlug(requestedSlug || name);
+  if (!slug) throw new ApiError(400, 'Please provide a valid business URL');
   const slugTaken = await Business.findOne({ slug });
-  if (slugTaken) slug = `${slug}-${Date.now().toString(36)}`;
+  if (slugTaken) throw new ApiError(409, 'This business URL is already in use');
 
   const parsedHours = openingHours ? JSON.parse(
     typeof openingHours === 'string' ? openingHours : JSON.stringify(openingHours)
@@ -92,6 +93,9 @@ const createBusiness = asyncHandler(async (req, res) => {
 
   const bannerFile = req.files?.banner?.[0];
   const galleryFiles = req.files?.gallery || [];
+  if (galleryFiles.length > 6) {
+    throw new ApiError(400, 'A maximum of six gallery photos is allowed');
+  }
 
   const business = await Business.create({
     owner: req.user._id,
@@ -111,6 +115,7 @@ const createBusiness = asyncHandler(async (req, res) => {
     description,
     instagram,
     facebook,
+    telegram,
     youtube,
     video,
     openingHours: parsedHours,
@@ -173,6 +178,14 @@ const getBusinessBySlug = asyncHandler(async (req, res) => {
   sendResponse(res, 200, { business });
 });
 
+const checkBusinessSlug = asyncHandler(async (req, res) => {
+  const slug = toSlug(req.query.slug);
+  if (!slug) throw new ApiError(400, 'Please provide a valid business URL');
+
+  const existingBusiness = await Business.exists({ slug });
+  sendResponse(res, 200, { slug, available: !existingBusiness });
+});
+
 // @desc    Get all businesses owned by the logged in user (dashboard)
 // @route   GET /api/v1/businesses/mine
 // @access  Private
@@ -196,10 +209,18 @@ const findOwnedBusiness = async (id, ownerId) => {
 const updateBusiness = asyncHandler(async (req, res) => {
   const business = await findOwnedBusiness(req.params.id, req.user._id);
 
+  if (req.body.slug !== undefined) {
+    const slug = toSlug(req.body.slug);
+    if (!slug) throw new ApiError(400, 'Please provide a valid business URL');
+    const slugTaken = await Business.findOne({ slug, _id: { $ne: business._id } });
+    if (slugTaken) throw new ApiError(409, 'This business URL is already in use');
+    business.slug = slug;
+  }
+
   const updatable = [
     'name', 'category', 'categoryId', 'phone', 'whatsapp', 'email', 'website',
     'address', 'city', 'location', 'description',
-    'instagram', 'facebook', 'youtube', 'video', 'template',
+    'instagram', 'facebook', 'telegram', 'youtube', 'video', 'template',
   ];
   updatable.forEach((field) => {
     if (req.body[field] !== undefined) business[field] = req.body[field];
@@ -223,12 +244,24 @@ const updateBusiness = asyncHandler(async (req, res) => {
     business.coverImage = business.image;
   }
 
-  const galleryFiles = req.files?.gallery || [];
-  if (galleryFiles.length) {
-    business.gallery = [...business.gallery, ...galleryFiles.map((f) => f.url)];
+  if (req.body.gallery !== undefined) {
+    const parsedGallery = typeof req.body.gallery === 'string'
+      ? JSON.parse(req.body.gallery)
+      : req.body.gallery;
+    if (!Array.isArray(parsedGallery)) {
+      throw new ApiError(400, 'Gallery photos must be provided as a list');
+    }
+    business.gallery = parsedGallery;
   }
   if (req.body.removeGalleryImage) {
     business.gallery = business.gallery.filter((url) => url !== req.body.removeGalleryImage);
+  }
+  const galleryFiles = req.files?.gallery || [];
+  if (business.gallery.length + galleryFiles.length > 6) {
+    throw new ApiError(400, 'A maximum of six gallery photos is allowed');
+  }
+  if (galleryFiles.length) {
+    business.gallery = [...business.gallery, ...galleryFiles.map((f) => f.url)];
   }
 
   await business.save();
@@ -248,6 +281,7 @@ module.exports = {
   createBusiness,
   getBusinesses,
   getBusinessBySlug,
+  checkBusinessSlug,
   getMyBusinesses,
   updateBusiness,
   deleteBusiness,

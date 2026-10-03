@@ -20,10 +20,10 @@ const upload = multer({
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB, matches frontend copy
 });
 
-// Accepts a single "banner" file + up to 8 "gallery" files in one request
+// Accepts a single "banner" file + up to 6 "gallery" files in one request
 const parseBusinessImages = upload.fields([
   { name: 'banner', maxCount: 1 },
-  { name: 'gallery', maxCount: 8 },
+  { name: 'gallery', maxCount: 6 },
 ]);
 
 const uploadToCloudinary = (file) => new Promise((resolve, reject) => {

@@ -12,6 +12,7 @@ const { Cashfree } = require('cashfree-pg');
 const {
   REFERRAL_COMMISSION,
   STANDARD_PLAN_PRICE,
+  GST_RATE_PERCENT,
   CASHFREE_CLIENT_ID,
   CASHFREE_CLIENT_SECRET,
   CASHFREE_ENV,
@@ -27,6 +28,31 @@ const normalizePaymentMethod = (method) => {
   ];
   return supportedMethods.includes(method) ? method : 'other';
 };
+
+const getPriceBreakdown = () => {
+  const baseAmount = Number(STANDARD_PLAN_PRICE);
+  const gstRate = Number(GST_RATE_PERCENT);
+  const gstAmount = Number((baseAmount * gstRate / 100).toFixed(2));
+  const totalAmount = Number((baseAmount + gstAmount).toFixed(2));
+
+  return {
+    amount: totalAmount,
+    baseAmount,
+    gstRate,
+    gstAmount,
+    totalAmount,
+    currency: 'INR',
+  };
+};
+
+const getPaymentPrice = asyncHandler(async (_req, res) => {
+  sendResponse(
+    res,
+    200,
+    getPriceBreakdown(),
+    'Payment price retrieved'
+  );
+});
 
 // --------------------------------------------------
 // Cashfree configuration
@@ -148,7 +174,7 @@ const createOrder = asyncHandler(
       order_id: orderId,
 
       order_amount:
-        Number(STANDARD_PLAN_PRICE),
+        getPriceBreakdown().totalAmount,
 
       order_currency: 'INR',
 
@@ -223,10 +249,7 @@ try {
         paymentSessionId:
           cashfreeOrder.payment_session_id,
 
-        amount:
-          STANDARD_PLAN_PRICE,
-
-        currency: 'INR',
+        ...getPriceBreakdown(),
 
         environment:
           CASHFREE_ENV,
@@ -280,7 +303,7 @@ const checkout = asyncHandler(
     // Check order amount
     if (
       Number(order.order_amount) !==
-      Number(STANDARD_PLAN_PRICE)
+      getPriceBreakdown().totalAmount
     ) {
       throw new ApiError(
         400,
@@ -373,7 +396,7 @@ const checkout = asyncHandler(
           successfulPayment.cf_payment_id,
 
         amount:
-          STANDARD_PLAN_PRICE,
+          getPriceBreakdown().totalAmount,
 
         method: normalizePaymentMethod(
           successfulPayment.payment_group
@@ -453,7 +476,7 @@ const processPaidOrder = async (
   const orderResponse = await cashfree.PGFetchOrder(orderId);
   const order = orderResponse.data;
 
-  if (Number(order.order_amount) !== Number(STANDARD_PLAN_PRICE)) {
+  if (Number(order.order_amount) !== getPriceBreakdown().totalAmount) {
     throw new ApiError(400, 'Cashfree order amount does not match');
   }
 
@@ -479,7 +502,7 @@ const processPaidOrder = async (
     transactionId: generateTransactionId(),
     cashfreeOrderId: orderId,
     cashfreePaymentId: successfulPayment.cf_payment_id,
-    amount: STANDARD_PLAN_PRICE,
+    amount: getPriceBreakdown().totalAmount,
     method: normalizePaymentMethod(successfulPayment.payment_group),
     plan: business.selectedPlan,
     status: 'success',
@@ -566,6 +589,7 @@ const getMyPayments = asyncHandler(
 );
 
 module.exports = {
+  getPaymentPrice,
   createOrder,
   checkout,
   webhook,

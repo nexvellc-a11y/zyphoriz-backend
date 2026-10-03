@@ -53,6 +53,7 @@ const businessSchema = new mongoose.Schema(
 
     instagram: { type: String, default: '' },
     facebook: { type: String, default: '' },
+    telegram: { type: String, default: '' },
     youtube: { type: String, default: '' },
     video: { type: String, default: '' },
 

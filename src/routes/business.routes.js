@@ -3,6 +3,7 @@ const {
   createBusiness,
   getBusinesses,
   getBusinessBySlug,
+  checkBusinessSlug,
   getMyBusinesses,
   updateBusiness,
   deleteBusiness,
@@ -14,6 +15,7 @@ const router = express.Router();
 
 // Order matters: static paths before the ":id" / ":slug" dynamic ones.
 router.get('/mine', protect, getMyBusinesses);
+router.get('/slug-availability', checkBusinessSlug);
 router.get('/slug/:slug', getBusinessBySlug);
 
 router

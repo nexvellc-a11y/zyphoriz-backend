@@ -1,9 +1,10 @@
 const express = require('express');
-const { createOrder, checkout, webhook, getMyPayments } = require('../controllers/payment.controller');
+const { getPaymentPrice, createOrder, checkout, webhook, getMyPayments } = require('../controllers/payment.controller');
 const { protect } = require('../middleware/auth.middleware');
 
 const router = express.Router();
 
+router.get('/price', getPaymentPrice);
 router.post('/order', protect, createOrder);
 router.post('/checkout', protect, checkout);
 router.post('/webhook', webhook);
