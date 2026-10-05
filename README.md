@@ -73,7 +73,8 @@ reload Nginx:
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
-This sets a 40 MB request limit to accommodate all supported images and multipart form fields.
+This sets a 40 MB request limit to accommodate all supported images and multipart form fields,
+and allows up to three minutes for slow image uploads and Cloudinary processing to complete.
 
 For Razorpay Test Mode, create test keys in the Razorpay Dashboard and add them to `backend/.env`:
 
