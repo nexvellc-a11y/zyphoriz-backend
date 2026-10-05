@@ -60,6 +60,21 @@ Requires a running MongoDB instance (local or Atlas) — set `MONGO_URI` accordi
 Business banner and gallery images are uploaded to Cloudinary. Set `CLOUDINARY_CLOUD_NAME`,
 `CLOUDINARY_API_KEY`, and `CLOUDINARY_API_SECRET` in `.env` before using the business image fields.
 
+### Nginx image uploads
+
+The API accepts a banner and up to six gallery images, each up to 5 MB. If Nginx sits in front of
+the API, its default request-body limit can reject these multipart requests before they reach
+Express; the resulting proxy error may appear in the browser as a network or CORS error.
+
+Include `deploy/nginx-upload-size.conf` inside the API's Nginx `server` block, then validate and
+reload Nginx:
+
+```bash
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+This sets a 40 MB request limit to accommodate all supported images and multipart form fields.
+
 For Razorpay Test Mode, create test keys in the Razorpay Dashboard and add them to `backend/.env`:
 
 ```env

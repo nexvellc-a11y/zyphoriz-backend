@@ -11,6 +11,14 @@ const openingHourSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const descriptionSectionSchema = new mongoose.Schema(
+  {
+    title: { type: String, default: '' },
+    description: { type: String, default: '' },
+  },
+  { _id: false }
+);
+
 const businessSchema = new mongoose.Schema(
   {
     owner: {
@@ -42,14 +50,22 @@ const businessSchema = new mongoose.Schema(
       },
     },
     whatsapp: { type: String, default: '' },
-    email: { type: String, required: [true, 'Email is required'] },
+    email: { type: String, default: '' },
     website: { type: String, default: '' },
 
-    address: { type: String, required: [true, 'Address is required'] },
-    city: { type: String, required: [true, 'City is required'] },
+    address: { type: String, default: '' },
+    city: { type: String, default: '' },
     location: { type: String, default: '' }, // combined address string or maps link
 
-    description: { type: String, required: [true, 'Description is required'] },
+    description: { type: String, default: '' },
+    descriptionSections: {
+      type: [descriptionSectionSchema],
+      default: () => [
+        { title: 'About', description: '' },
+        { title: '', description: '' },
+        { title: '', description: '' },
+      ],
+    },
 
     instagram: { type: String, default: '' },
     facebook: { type: String, default: '' },

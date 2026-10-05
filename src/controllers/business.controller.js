@@ -57,6 +57,33 @@ const parseAdditionalPhones = (value) => {
   return cleanedPhones;
 };
 
+const parseDescriptionSections = (value, fallbackDescription = '') => {
+  if (value === undefined) {
+    return [
+      { title: 'About', description: fallbackDescription },
+      { title: '', description: '' },
+      { title: '', description: '' },
+    ];
+  }
+
+  let sections = value;
+  if (typeof sections === 'string') {
+    try {
+      sections = JSON.parse(sections);
+    } catch {
+      throw new ApiError(400, 'Description sections must be valid JSON');
+    }
+  }
+  if (!Array.isArray(sections) || sections.length !== 3) {
+    throw new ApiError(400, 'Exactly three description sections are required');
+  }
+
+  return sections.map((section, index) => ({
+    title: String(section?.title || (index === 0 ? 'About' : '')).trim(),
+    description: String(section?.description || '').trim(),
+  }));
+};
+
 // @desc    Create a new business listing (starts as pending_payment)
 // @route   POST /api/v1/businesses
 // @access  Private
@@ -68,8 +95,8 @@ const createBusiness = asyncHandler(async (req, res) => {
     openingHours, referralCode, template,
   } = req.body;
 
-  if (!name || !phone || !email || !address || !city || !description) {
-    throw new ApiError(400, 'Please fill in all required business fields');
+  if (!name || !phone) {
+    throw new ApiError(400, 'Business name and phone number are required');
   }
 
   const normalizedReferralCode = referralCode?.trim();
@@ -82,7 +109,7 @@ const createBusiness = asyncHandler(async (req, res) => {
     }
   }
 
-  const slug = toSlug(requestedSlug || name);
+  const slug = toSlug(requestedSlug);
   if (!slug) throw new ApiError(400, 'Please provide a valid business URL');
   const slugTaken = await Business.findOne({ slug });
   if (slugTaken) throw new ApiError(409, 'This business URL is already in use');
@@ -90,8 +117,15 @@ const createBusiness = asyncHandler(async (req, res) => {
   const parsedHours = openingHours ? JSON.parse(
     typeof openingHours === 'string' ? openingHours : JSON.stringify(openingHours)
   ) : DEFAULT_OPENING_HOURS;
+  const parsedDescriptionSections = parseDescriptionSections(
+    req.body.descriptionSections,
+    description || ''
+  );
 
   const bannerFile = req.files?.banner?.[0];
+  if (!bannerFile && !req.body.image) {
+    throw new ApiError(400, 'A banner image is required');
+  }
   const galleryFiles = req.files?.gallery || [];
   if (galleryFiles.length > 6) {
     throw new ApiError(400, 'A maximum of six gallery photos is allowed');
@@ -111,8 +145,9 @@ const createBusiness = asyncHandler(async (req, res) => {
     website,
     address,
     city,
-    location: location || `${address}, ${city}`,
-    description,
+    location: location || [address, city].filter(Boolean).join(', '),
+    description: parsedDescriptionSections[0].description,
+    descriptionSections: parsedDescriptionSections,
     instagram,
     facebook,
     telegram,
@@ -219,12 +254,26 @@ const updateBusiness = asyncHandler(async (req, res) => {
 
   const updatable = [
     'name', 'category', 'categoryId', 'phone', 'whatsapp', 'email', 'website',
-    'address', 'city', 'location', 'description',
+    'address', 'city', 'location',
     'instagram', 'facebook', 'telegram', 'youtube', 'video', 'template',
   ];
   updatable.forEach((field) => {
     if (req.body[field] !== undefined) business[field] = req.body[field];
   });
+
+  if (req.body.descriptionSections !== undefined) {
+    business.descriptionSections = parseDescriptionSections(
+      req.body.descriptionSections,
+      req.body.description || business.description || ''
+    );
+    business.description = business.descriptionSections[0].description;
+  } else if (req.body.description !== undefined) {
+    business.description = req.body.description;
+    business.descriptionSections = parseDescriptionSections(
+      undefined,
+      req.body.description
+    );
+  }
 
   if (req.body.additionalPhones !== undefined) {
     business.additionalPhones = parseAdditionalPhones(req.body.additionalPhones);
