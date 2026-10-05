@@ -14,8 +14,12 @@ const { notFound, errorHandler } = require('./middleware/error.middleware');
 
 const app = express();
 
+// Trust Nginx reverse proxy
+app.set('trust proxy', 1);
+
 // ── Security & core middleware ──────────────────────────────────────────
-app.use(helmet({ crossOriginResourcePolicy: false })); 
+app.use(helmet({ crossOriginResourcePolicy: false }));
+
 const allowedOrigins = [
   ...(process.env.CLIENT_URL || '').split(','),
   'http://localhost:5173',
