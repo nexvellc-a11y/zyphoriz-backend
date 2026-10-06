@@ -6,7 +6,7 @@ module.exports = {
   GST_RATE_PERCENT: Number(process.env.GST_RATE_PERCENT || 18),
   CASHFREE_CLIENT_ID: process.env.CASHFREE_CLIENT_ID,
   CASHFREE_CLIENT_SECRET: process.env.CASHFREE_CLIENT_SECRET,
-  CASHFREE_ENV: process.env.CASHFREE_ENV || "SANDBOX",
+  CASHFREE_ENV: process.env.CASHFREE_ENV || "PRODUCTION",
   DEFAULT_OPENING_HOURS: [
     { day: "Monday", open: true, from: "09:00", to: "18:00" },
     { day: "Tuesday", open: true, from: "09:00", to: "18:00" },

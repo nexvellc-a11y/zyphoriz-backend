@@ -208,7 +208,10 @@ const getBusinesses = asyncHandler(async (req, res) => {
 // @route   GET /api/v1/businesses/slug/:slug
 // @access  Public
 const getBusinessBySlug = asyncHandler(async (req, res) => {
-  const business = await Business.findOne({ slug: req.params.slug });
+  const business = await Business.findOne({
+    slug: req.params.slug,
+    status: 'active',
+  });
   if (!business) throw new ApiError(404, 'Business not found');
   sendResponse(res, 200, { business });
 });

@@ -8,7 +8,7 @@ const User = require('../models/User');
 const ApiError = require('../utils/ApiError');
 const sendResponse = require('../utils/apiResponse');
 
-const { Cashfree } = require('cashfree-pg');
+const { Cashfree, CFEnvironment } = require('cashfree-pg');
 const {
   REFERRAL_COMMISSION,
   STANDARD_PLAN_PRICE,
@@ -45,6 +45,21 @@ const getPriceBreakdown = () => {
   };
 };
 
+const getPublicWebhookUrl = () => {
+  try {
+    const apiUrl = new URL(process.env.API_URL);
+    if (
+      apiUrl.protocol !== 'https:' ||
+      ['localhost', '127.0.0.1', '::1'].includes(apiUrl.hostname)
+    ) {
+      return null;
+    }
+    return `${apiUrl.origin}/api/v1/payments/webhook`;
+  } catch {
+    return null;
+  }
+};
+
 const getPaymentPrice = asyncHandler(async (_req, res) => {
   sendResponse(
     res,
@@ -60,8 +75,8 @@ const getPaymentPrice = asyncHandler(async (_req, res) => {
 
 const cashfree = new Cashfree(
   CASHFREE_ENV === 'PRODUCTION'
-    ? Cashfree.PRODUCTION
-    : Cashfree.SANDBOX,
+    ? CFEnvironment.PRODUCTION
+    : CFEnvironment.SANDBOX,
   CASHFREE_CLIENT_ID,
   CASHFREE_CLIENT_SECRET
 );
@@ -153,6 +168,7 @@ const createOrder = asyncHandler(
   async (req, res) => {
 
     const { businessId } = req.body;
+console.log(businessId,'bus');
 
     if (!businessId) {
       throw new ApiError(
@@ -166,9 +182,16 @@ const createOrder = asyncHandler(
         businessId,
         req.user._id
       );
+console.log(req.user.id, 'id');
 
     const orderId =
       `zyphoriz_${businessId}_${Date.now()}`;
+    const notifyUrl = getPublicWebhookUrl();
+    if (!notifyUrl) {
+      console.warn(
+        'Cashfree webhook notify_url omitted: API_URL must be a public HTTPS URL.',
+      );
+    }
 
     const request = {
       order_id: orderId,
@@ -196,12 +219,11 @@ const createOrder = asyncHandler(
           '9999999999',
       },
 
-     order_meta: {
-  return_url:
-    `${process.env.FRONTEND_URL}/payment/callback?order_id=${encodeURIComponent(orderId)}`,
-  notify_url:
-    `${process.env.API_URL}/api/v1/payments/webhook`,
-},
+      order_meta: {
+        return_url:
+          `${process.env.FRONTEND_URL}/payment/callback?order_id=${encodeURIComponent(orderId)}`,
+        ...(notifyUrl ? { notify_url: notifyUrl } : {}),
+      },
 
       order_note:
         `Zyphoriz business activation - ${business.name}`,
