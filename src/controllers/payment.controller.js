@@ -4,20 +4,16 @@ const crypto = require('crypto');
 const Payment = require('../models/Payment');
 const Business = require('../models/Business');
 const User = require('../models/User');
-
 const ApiError = require('../utils/ApiError');
 const sendResponse = require('../utils/apiResponse');
 
-const { Cashfree, CFEnvironment } = require('cashfree-pg');
 const {
   REFERRAL_COMMISSION,
   STANDARD_PLAN_PRICE,
   GST_RATE_PERCENT,
-  CASHFREE_CLIENT_ID,
-  CASHFREE_CLIENT_SECRET,
-  CASHFREE_ENV,
+  RAZORPAY_KEY_ID,
+  RAZORPAY_KEY_SECRET,
 } = require('../config/constants');
-
 
 const generateTransactionId = () =>
   `ZYP-${crypto.randomInt(10000000, 99999999)}`;
@@ -45,50 +41,38 @@ const getPriceBreakdown = () => {
   };
 };
 
-const getPublicWebhookUrl = () => {
-  try {
-    const apiUrl = new URL(process.env.API_URL);
-    if (
-      apiUrl.protocol !== 'https:' ||
-      ['localhost', '127.0.0.1', '::1'].includes(apiUrl.hostname)
-    ) {
-      return null;
-    }
-    return `${apiUrl.origin}/api/v1/payments/webhook`;
-  } catch {
-    return null;
+const razorpayRequest = async (path, options = {}) => {
+  if (!RAZORPAY_KEY_ID || !RAZORPAY_KEY_SECRET) {
+    throw new ApiError(500, 'Razorpay credentials are not configured');
   }
+
+  const response = await fetch(`https://api.razorpay.com/v1${path}`, {
+    ...options,
+    headers: {
+      Authorization: `Basic ${Buffer.from(
+        `${RAZORPAY_KEY_ID}:${RAZORPAY_KEY_SECRET}`
+      ).toString('base64')}`,
+      'Content-Type': 'application/json',
+      ...options.headers,
+    },
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    console.error('Razorpay API request failed:', {
+      status: response.status,
+      error: data.error?.description || data.error?.reason,
+    });
+    throw new ApiError(
+      response.status >= 400 && response.status < 500 ? response.status : 502,
+      data.error?.description || 'Razorpay request failed'
+    );
+  }
+
+  return data;
 };
 
-const getPaymentPrice = asyncHandler(async (_req, res) => {
-  sendResponse(
-    res,
-    200,
-    getPriceBreakdown(),
-    'Payment price retrieved'
-  );
-});
-
-// --------------------------------------------------
-// Cashfree configuration
-// --------------------------------------------------
-
-const cashfree = new Cashfree(
-  CASHFREE_ENV === 'PRODUCTION'
-    ? CFEnvironment.PRODUCTION
-    : CFEnvironment.SANDBOX,
-  CASHFREE_CLIENT_ID,
-  CASHFREE_CLIENT_SECRET
-);
-
-// --------------------------------------------------
-// Referral commission
-// --------------------------------------------------
-
-const awardReferralCommission = async (
-  referralCode,
-  referredUserId
-) => {
+const awardReferralCommission = async (referralCode, referredUserId) => {
   if (!referralCode) return;
 
   const escapedCode = referralCode
@@ -97,386 +81,21 @@ const awardReferralCommission = async (
 
   await User.findOneAndUpdate(
     {
-      referralCode: {
-        $regex: `^${escapedCode}$`,
-        $options: 'i',
-      },
-
-      _id: {
-        $ne: referredUserId,
-      },
-
-      referredUserIds: {
-        $ne: referredUserId,
-      },
+      referralCode: { $regex: `^${escapedCode}$`, $options: 'i' },
+      _id: { $ne: referredUserId },
+      referredUserIds: { $ne: referredUserId },
     },
     {
       $inc: {
         referralEarnings: REFERRAL_COMMISSION,
         referralCount: 1,
       },
-
-      $addToSet: {
-        referredUserIds: referredUserId,
-      },
+      $addToSet: { referredUserIds: referredUserId },
     }
   );
 };
 
-// --------------------------------------------------
-// Get owned business
-// --------------------------------------------------
-
-const getOwnedBusiness = async (
-  businessId,
-  userId
-) => {
-  const business = await Business.findById(businessId);
-
-  if (!business) {
-    throw new ApiError(
-      404,
-      'Business not found'
-    );
-  }
-
-  if (
-    String(business.owner) !==
-    String(userId)
-  ) {
-    throw new ApiError(
-      403,
-      'You do not own this business listing'
-    );
-  }
-
-  if (business.status === 'active') {
-    throw new ApiError(
-      400,
-      'This business listing is already active'
-    );
-  }
-
-  return business;
-};
-
-// --------------------------------------------------
-// CREATE CASHFREE ORDER
-// --------------------------------------------------
-
-const createOrder = asyncHandler(
-  async (req, res) => {
-
-    const { businessId } = req.body;
-console.log(businessId,'bus');
-
-    if (!businessId) {
-      throw new ApiError(
-        400,
-        'Business ID is required'
-      );
-    }
-
-    const business =
-      await getOwnedBusiness(
-        businessId,
-        req.user._id
-      );
-console.log(req.user.id, 'id');
-
-    const orderId =
-      `zyphoriz_${businessId}_${Date.now()}`;
-    const notifyUrl = getPublicWebhookUrl();
-    if (!notifyUrl) {
-      console.warn(
-        'Cashfree webhook notify_url omitted: API_URL must be a public HTTPS URL.',
-      );
-    }
-
-    const request = {
-      order_id: orderId,
-
-      order_amount:
-        getPriceBreakdown().totalAmount,
-
-      order_currency: 'INR',
-
-      customer_details: {
-        customer_id:
-          String(req.user._id),
-
-        customer_name:
-          req.user.name ||
-          business.name ||
-          'Zyphoriz Customer',
-
-        customer_email:
-          req.user.email,
-
-        customer_phone:
-          req.user.mobileNumber ||
-          req.user.phone ||
-          '9999999999',
-      },
-
-      order_meta: {
-        return_url:
-          `${process.env.FRONTEND_URL}/payment/callback?order_id=${encodeURIComponent(orderId)}`,
-        ...(notifyUrl ? { notify_url: notifyUrl } : {}),
-      },
-
-      order_note:
-        `Zyphoriz business activation - ${business.name}`,
-
-      order_tags: {
-        businessId:
-          String(business._id),
-
-        userId:
-          String(req.user._id),
-      },
-    };
-
-   let response;
-
-try {
-  response = await cashfree.PGCreateOrder(request);
-} catch (error) {
-  console.error('Cashfree order creation failed:', {
-    status: error.response?.status,
-    data: error.response?.data,
-    message: error.message,
-  });
-
-  throw new ApiError(
-    error.response?.status || 500,
-    error.response?.data?.message ||
-      'Unable to create Cashfree order'
-  );
-}
-
-    const cashfreeOrder =
-      response.data;
-
-    sendResponse(
-      res,
-      201,
-      {
-        orderId:
-          cashfreeOrder.order_id,
-
-        cfOrderId:
-          cashfreeOrder.cf_order_id,
-
-        paymentSessionId:
-          cashfreeOrder.payment_session_id,
-
-        ...getPriceBreakdown(),
-
-        environment:
-          CASHFREE_ENV,
-      },
-      'Cashfree order created'
-    );
-  }
-);
-
-// --------------------------------------------------
-// VERIFY / COMPLETE CASHFREE PAYMENT
-// --------------------------------------------------
-
-const checkout = asyncHandler(
-  async (req, res) => {
-
-    const {
-      businessId,
-      orderId,
-    } = req.body;
-
-    if (!businessId || !orderId) {
-      throw new ApiError(
-        400,
-        'Business ID and Cashfree order ID are required'
-      );
-    }
-
-    const business = await Business.findById(businessId);
-
-    if (!business) {
-      throw new ApiError(404, 'Business not found');
-    }
-
-    if (String(business.owner) !== String(req.user._id)) {
-      throw new ApiError(
-        403,
-        'You do not own this business listing'
-      );
-    }
-
-    // Fetch order from Cashfree
-    const orderResponse =
-      await cashfree.PGFetchOrder(
-        orderId
-      );
-
-    const order =
-      orderResponse.data;
-
-    // Check order amount
-    if (
-      Number(order.order_amount) !==
-      getPriceBreakdown().totalAmount
-    ) {
-      throw new ApiError(
-        400,
-        'Cashfree order amount does not match'
-      );
-    }
-
-    // Check customer
-    if (
-      String(
-        order.customer_details?.customer_id
-      ) !== String(req.user._id)
-    ) {
-      throw new ApiError(
-        400,
-        'Cashfree order does not belong to this user'
-      );
-    }
-
-    // Cashfree order must be PAID
-    if (order.order_status !== 'PAID') {
-
-      throw new ApiError(
-        400,
-        `Payment not completed. Current status: ${order.order_status}`
-      );
-    }
-
-    // Check whether payment already exists
-    const existingPayment =
-      await Payment.findOne({
-        cashfreeOrderId: orderId,
-      });
-
-    if (existingPayment) {
-
-      return sendResponse(
-        res,
-        200,
-        {
-          payment: existingPayment,
-          business,
-        },
-        'Payment already processed'
-      );
-    }
-
-    // Fetch transactions
-    const paymentsResponse =
-      await cashfree.PGOrderFetchPayments(
-        orderId
-      );
-
-    const payments =
-      paymentsResponse.data;
-
-    const successfulPayment =
-      payments.find(
-        payment =>
-          payment.payment_status === 'SUCCESS'
-      );
-
-    if (!successfulPayment) {
-      throw new ApiError(
-        400,
-        'Successful Cashfree transaction not found'
-      );
-    }
-
-    // ------------------------------------------------
-    // Create payment record
-    // ------------------------------------------------
-
-    const payment =
-      await Payment.create({
-
-        user:
-          req.user._id,
-
-        business:
-          business._id,
-
-        transactionId:
-          generateTransactionId(),
-
-        cashfreeOrderId:
-          orderId,
-
-        cashfreePaymentId:
-          successfulPayment.cf_payment_id,
-
-        amount:
-          getPriceBreakdown().totalAmount,
-
-        method: normalizePaymentMethod(
-          successfulPayment.payment_group
-        ),
-
-        plan:
-          business.selectedPlan,
-
-        status:
-          'success',
-      });
-
-    // ------------------------------------------------
-    // Activate business
-    // ------------------------------------------------
-
-    business.status = 'active';
-
-    business.verified = true;
-
-    business.planExpiresAt =
-      new Date(
-        Date.now() +
-        365 *
-        24 *
-        60 *
-        60 *
-        1000
-      );
-
-    await business.save();
-
-    // ------------------------------------------------
-    // Referral commission
-    // ------------------------------------------------
-
-    await awardReferralCommission(
-      business.referralCodeUsed,
-      req.user._id
-    );
-
-    sendResponse(
-      res,
-      200,
-      {
-        payment,
-        business,
-      },
-      'Payment successful, your business is now live'
-    );
-  }
-);
-
-const processPaidOrder = async (
-  orderId,
-  businessId,
-  userId
-) => {
+const getOwnedBusiness = async (businessId, userId) => {
   const business = await Business.findById(businessId);
 
   if (!business) {
@@ -484,136 +103,171 @@ const processPaidOrder = async (
   }
 
   if (String(business.owner) !== String(userId)) {
-    throw new ApiError(403, 'Payment owner does not match business owner');
+    throw new ApiError(403, 'You do not own this business listing');
   }
 
-  const existingPayment = await Payment.findOne({
-    cashfreeOrderId: orderId,
+  if (business.status === 'active') {
+    throw new ApiError(400, 'This business listing is already active');
+  }
+
+  return business;
+};
+
+const getPaymentPrice = asyncHandler(async (_req, res) => {
+  sendResponse(res, 200, getPriceBreakdown(), 'Payment price retrieved');
+});
+
+const createOrder = asyncHandler(async (req, res) => {
+  const { businessId } = req.body;
+  if (!businessId) {
+    throw new ApiError(400, 'Business ID is required');
+  }
+
+  const business = await getOwnedBusiness(businessId, req.user._id);
+  const price = getPriceBreakdown();
+  const order = await razorpayRequest('/orders', {
+    method: 'POST',
+    body: JSON.stringify({
+      amount: Math.round(price.totalAmount * 100),
+      currency: price.currency,
+      receipt: `zyphoriz_${business._id}_${Date.now()}`.slice(0, 40),
+      notes: {
+        businessId: String(business._id),
+        userId: String(req.user._id),
+      },
+    }),
   });
 
+  sendResponse(
+    res,
+    201,
+    {
+      order: {
+        id: order.id,
+        amount: order.amount,
+        currency: order.currency,
+      },
+      keyId: RAZORPAY_KEY_ID,
+      ...price,
+    },
+    'Razorpay order created'
+  );
+});
+
+const checkout = asyncHandler(async (req, res) => {
+  const {
+    businessId,
+    razorpay_order_id: orderId,
+    razorpay_payment_id: paymentId,
+    razorpay_signature: signature,
+  } = req.body;
+
+  if (!businessId || !orderId || !paymentId || !signature) {
+    throw new ApiError(400, 'Business and Razorpay payment details are required');
+  }
+
+  const business = await Business.findById(businessId);
+  if (!business) {
+    throw new ApiError(404, 'Business not found');
+  }
+  if (String(business.owner) !== String(req.user._id)) {
+    throw new ApiError(403, 'You do not own this business listing');
+  }
+
+  if (!RAZORPAY_KEY_ID || !RAZORPAY_KEY_SECRET) {
+    throw new ApiError(500, 'Razorpay credentials are not configured');
+  }
+
+  const existingPayment = await Payment.findOne({ razorpayOrderId: orderId });
   if (existingPayment) {
-    return { payment: existingPayment, business };
-  }
-
-  const orderResponse = await cashfree.PGFetchOrder(orderId);
-  const order = orderResponse.data;
-
-  if (Number(order.order_amount) !== getPriceBreakdown().totalAmount) {
-    throw new ApiError(400, 'Cashfree order amount does not match');
-  }
-
-  if (order.order_status !== 'PAID') {
-    throw new ApiError(
-      400,
-      `Payment not completed. Current status: ${order.order_status}`
+    if (String(existingPayment.user) !== String(req.user._id)) {
+      throw new ApiError(403, 'Payment does not belong to this user');
+    }
+    return sendResponse(
+      res,
+      200,
+      { payment: existingPayment, business },
+      'Payment already processed'
     );
   }
 
-  const paymentsResponse = await cashfree.PGOrderFetchPayments(orderId);
-  const successfulPayment = paymentsResponse.data.find(
-    (payment) => payment.payment_status === 'SUCCESS'
-  );
+  const expectedSignature = crypto
+    .createHmac('sha256', RAZORPAY_KEY_SECRET)
+    .update(`${orderId}|${paymentId}`)
+    .digest('hex');
+  if (!/^[a-f\d]{64}$/i.test(signature)) {
+    throw new ApiError(400, 'Invalid Razorpay payment signature');
+  }
+  const signatureBuffer = Buffer.from(signature, 'hex');
+  const expectedBuffer = Buffer.from(expectedSignature, 'hex');
+  if (
+    signatureBuffer.length !== expectedBuffer.length ||
+    !crypto.timingSafeEqual(signatureBuffer, expectedBuffer)
+  ) {
+    throw new ApiError(400, 'Invalid Razorpay payment signature');
+  }
 
-  if (!successfulPayment) {
-    throw new ApiError(400, 'Successful Cashfree transaction not found');
+  const [order, paymentDetails] = await Promise.all([
+    razorpayRequest(`/orders/${encodeURIComponent(orderId)}`),
+    razorpayRequest(`/payments/${encodeURIComponent(paymentId)}`),
+  ]);
+  const expectedAmount = Math.round(getPriceBreakdown().totalAmount * 100);
+
+  if (
+    order.amount !== expectedAmount ||
+    order.currency !== 'INR' ||
+    String(order.notes?.businessId) !== String(business._id) ||
+    String(order.notes?.userId) !== String(req.user._id)
+  ) {
+    throw new ApiError(400, 'Razorpay order details do not match this purchase');
+  }
+  if (
+    paymentDetails.order_id !== orderId ||
+    paymentDetails.status !== 'captured' ||
+    paymentDetails.amount !== expectedAmount ||
+    paymentDetails.currency !== 'INR'
+  ) {
+    throw new ApiError(400, 'Razorpay payment has not been captured');
   }
 
   const payment = await Payment.create({
-    user: userId,
+    user: req.user._id,
     business: business._id,
     transactionId: generateTransactionId(),
-    cashfreeOrderId: orderId,
-    cashfreePaymentId: successfulPayment.cf_payment_id,
+    razorpayOrderId: orderId,
+    razorpayPaymentId: paymentId,
     amount: getPriceBreakdown().totalAmount,
-    method: normalizePaymentMethod(successfulPayment.payment_group),
+    method: normalizePaymentMethod(paymentDetails.method),
     plan: business.selectedPlan,
     status: 'success',
   });
 
   business.status = 'active';
   business.verified = true;
-  business.planExpiresAt = new Date(
-    Date.now() + 365 * 24 * 60 * 60 * 1000
-  );
+  business.planExpiresAt = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000);
   await business.save();
 
-  await awardReferralCommission(
-    business.referralCodeUsed,
-    userId
+  await awardReferralCommission(business.referralCodeUsed, req.user._id);
+
+  sendResponse(
+    res,
+    200,
+    { payment, business },
+    'Payment successful, your business is now live'
   );
-
-  return { payment, business };
-};
-
-const webhook = asyncHandler(async (req, res) => {
-  const timestamp = req.get('x-webhook-timestamp');
-  const signature = req.get('x-webhook-signature');
-  const rawBody = req.rawBody || JSON.stringify(req.body);
-
-  if (!timestamp || !signature) {
-    throw new ApiError(400, 'Cashfree webhook signature is missing');
-  }
-
-  const expectedSignature = crypto
-    .createHmac('sha256', CASHFREE_CLIENT_SECRET)
-    .update(`${timestamp}${rawBody}`)
-    .digest('base64');
-
-  const signatureBuffer = Buffer.from(signature);
-  const expectedBuffer = Buffer.from(expectedSignature);
-
-  if (
-    signatureBuffer.length !== expectedBuffer.length ||
-    !crypto.timingSafeEqual(signatureBuffer, expectedBuffer)
-  ) {
-    throw new ApiError(401, 'Invalid Cashfree webhook signature');
-  }
-
-  const orderId = req.body?.data?.order?.order_id;
-  const orderStatus = req.body?.data?.order?.order_status;
-  const businessId = req.body?.data?.order?.order_tags?.businessId;
-  const userId = req.body?.data?.order?.order_tags?.userId;
-
-  if (orderStatus === 'PAID' && orderId && businessId && userId) {
-    await processPaidOrder(orderId, businessId, userId);
-  }
-
-  res.status(200).json({ success: true });
 });
 
-// --------------------------------------------------
-// PAYMENT HISTORY
-// --------------------------------------------------
+const getMyPayments = asyncHandler(async (req, res) => {
+  const payments = await Payment.find({ user: req.user._id })
+    .populate('business', 'name slug')
+    .sort({ createdAt: -1 });
 
-const getMyPayments = asyncHandler(
-  async (req, res) => {
-
-    const payments =
-      await Payment.find({
-        user: req.user._id,
-      })
-        .populate(
-          'business',
-          'name slug'
-        )
-        .sort({
-          createdAt: -1,
-        });
-
-    sendResponse(
-      res,
-      200,
-      {
-        payments,
-      }
-    );
-  }
-);
+  sendResponse(res, 200, { payments });
+});
 
 module.exports = {
   getPaymentPrice,
   createOrder,
   checkout,
-  webhook,
   getMyPayments,
 };

@@ -131,12 +131,13 @@ Create → Payment Checkout → Payment Success flow.
 | Method | Route | Access | Body |
 |---|---|---|---|
 | POST | `/payments/order` | Private | `{ businessId }` |
-| POST | `/payments/checkout` | Private | `{ businessId, method, razorpay_order_id, razorpay_payment_id, razorpay_signature }` |
+| POST | `/payments/checkout` | Private | `{ businessId, razorpay_order_id, razorpay_payment_id, razorpay_signature }` |
 | GET | `/payments/mine` | Private | Payment history for the logged-in user |
 
 `/payments/order` creates a Razorpay order for the standard plan. `/payments/checkout` verifies
-the Razorpay signature, then activates the business, sets a 1-year `planExpiresAt`, and pays a
-₹50 referral commission to the owner of `referralCodeUsed` (if any).
+the Razorpay signature and confirms the captured payment with Razorpay before activating the
+business, setting a 1-year `planExpiresAt`, and paying the configured referral commission to the
+owner of `referralCodeUsed` (if any).
 
 ### Users
 | Method | Route | Access |

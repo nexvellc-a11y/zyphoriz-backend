@@ -4,9 +4,8 @@ module.exports = {
   REFERRAL_COMMISSION: Number(process.env.REFERRAL_COMMISSION || 50),
   STANDARD_PLAN_PRICE: Number(process.env.STANDARD_PLAN_PRICE || 500),
   GST_RATE_PERCENT: Number(process.env.GST_RATE_PERCENT || 18),
-  CASHFREE_CLIENT_ID: process.env.CASHFREE_CLIENT_ID,
-  CASHFREE_CLIENT_SECRET: process.env.CASHFREE_CLIENT_SECRET,
-  CASHFREE_ENV: process.env.CASHFREE_ENV || "PRODUCTION",
+  RAZORPAY_KEY_ID: process.env.RAZORPAY_KEY_ID,
+  RAZORPAY_KEY_SECRET: process.env.RAZORPAY_KEY_SECRET,
   DEFAULT_OPENING_HOURS: [
     { day: "Monday", open: true, from: "09:00", to: "18:00" },
     { day: "Tuesday", open: true, from: "09:00", to: "18:00" },
