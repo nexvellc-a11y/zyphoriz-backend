@@ -7,7 +7,7 @@ const sendResponse = require('../utils/apiResponse');
 // @access  Public
 const getCategories = asyncHandler(async (req, res) => {
   const pageNum = Math.max(Number(req.query.page) || 1, 1);
-  const limitNum = Math.min(Math.max(Number(req.query.limit) || 8, 1), 50);
+  const limitNum = Math.min(Math.max(Number(req.query.limit) || 8, 1), 200);
   const [categories, total] = await Promise.all([
     Category.find()
       .sort({ popular: -1, name: 1 })
