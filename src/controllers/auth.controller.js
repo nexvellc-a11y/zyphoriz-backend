@@ -166,12 +166,19 @@ const sendOtpController = asyncHandler(async (req, res) => {
   try {
     await sendOtpEmail(normalizedEmail, otp);
   } catch (error) {
+    console.error('OTP email delivery failed', {
+      name: error.name,
+      code: error.code,
+      command: error.command,
+      responseCode: error.responseCode,
+    });
+
     // Do not leave an unusable OTP stored if delivery fails.
     user.otp = undefined;
     user.otpExpiry = undefined;
     await user.save();
 
-    throw error;
+    throw new ApiError(502, 'OTP email delivery failed. Please try again later.');
   }
 
   return res.status(200).json({

@@ -117,6 +117,9 @@ Password reset tokens are single-use and expire after 10 minutes. Configure `SMT
 `SMTP_PORT` (optional; defaults to `587`), `SMTP_SECURE` (`true` for implicit TLS),
 `SMTP_USER`, `SMTP_PASS`, `MAIL_FROM`, and `PASSWORD_RESET_URL` in the backend environment.
 `PASSWORD_RESET_URL` should point to the frontend page that accepts the `token` query parameter.
+The production host must allow outbound connections to the configured SMTP host and port.
+OTP delivery fails with a gateway error if the SMTP connection cannot be established or mail
+cannot be delivered; check the backend logs for the SMTP error code.
 
 ### Categories
 | Method | Route | Access |
