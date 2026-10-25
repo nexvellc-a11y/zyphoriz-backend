@@ -105,8 +105,18 @@ Base URL: `/api/v1`
 |---|---|---|---|
 | POST | `/auth/register` | Public | `{ mobile, email, password }` |
 | POST | `/auth/login` | Public | `{ identifier, password }` (identifier = email or mobile) |
+| POST | `/auth/forgot-password` | Public | `{ email }` — sends a password reset link if the account exists |
+| POST | `/auth/reset-password-token` | Public | `{ token, password }` — resets the password using the emailed token |
+| POST | `/auth/send-otp` | Public | `{ email }` — sends a six-digit password-reset OTP |
+| POST | `/auth/verify-otp` | Public | `{ email, otp }` — verifies the OTP |
+| POST | `/auth/reset-password` | Public | `{ email, otp, newPassword }` — resets the password using the OTP |
 | POST | `/auth/logout` | Private | — |
 | GET | `/auth/me` | Private | — |
+
+Password reset tokens are single-use and expire after 10 minutes. Configure `SMTP_HOST`,
+`SMTP_PORT` (optional; defaults to `587`), `SMTP_SECURE` (`true` for implicit TLS),
+`SMTP_USER`, `SMTP_PASS`, `MAIL_FROM`, and `PASSWORD_RESET_URL` in the backend environment.
+`PASSWORD_RESET_URL` should point to the frontend page that accepts the `token` query parameter.
 
 ### Categories
 | Method | Route | Access |
