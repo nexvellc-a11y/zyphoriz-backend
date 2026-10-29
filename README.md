@@ -17,12 +17,14 @@ backend/
 │   │   ├── Category.js
 │   │   └── Payment.js
 │   ├── controllers/
+│   │   ├── admin.controller.js
 │   │   ├── auth.controller.js
 │   │   ├── business.controller.js
 │   │   ├── category.controller.js
 │   │   ├── payment.controller.js
 │   │   └── user.controller.js
 │   ├── routes/
+│   │   ├── admin.routes.js
 │   │   ├── auth.routes.js
 │   │   ├── business.routes.js
 │   │   ├── category.routes.js
@@ -33,6 +35,7 @@ backend/
 │   │   ├── error.middleware.js   # centralized error handler
 │   │   └── upload.middleware.js  # multer banner + gallery uploads
 │   ├── utils/
+│   │   ├── createAdmin.js         # one-time local administrator bootstrap
 │   │   ├── ApiError.js
 │   │   ├── apiResponse.js
 │   │   ├── generateToken.js
@@ -62,9 +65,11 @@ Business banner and gallery images are uploaded to Cloudinary. Set `CLOUDINARY_C
 
 ### Nginx image uploads
 
-The API accepts a banner and up to six gallery images, each up to 5 MB. If Nginx sits in front of
-the API, its default request-body limit can reject these multipart requests before they reach
-Express; the resulting proxy error may appear in the browser as a network or CORS error.
+The frontend compresses selected business images to WebP (up to 1920 pixels on the longest side)
+before upload when that reduces their size. The API accepts a banner and up to six gallery images,
+each up to 5 MB after compression. If Nginx sits in front of the API, its default request-body
+limit can reject these multipart requests before they reach Express; the resulting proxy error may
+appear in the browser as a network or CORS error.
 
 Include `deploy/nginx-upload-size.conf` inside the API's Nginx `server` block, then validate and
 reload Nginx:
@@ -156,6 +161,55 @@ owner of `referralCodeUsed` (if any).
 | Method | Route | Access |
 |---|---|---|
 | GET | `/users/referrals` | Private — returns `{ referralCode, referralEarnings, referralCount }` |
+
+### Admin
+All admin routes require a JWT for a user whose `role` is `admin`. List endpoints accept
+`q`, `page`, and `limit` (default 20, maximum 100) and return a `pagination` object.
+
+| Method | Route | Access | Notes |
+|---|---|---|---|
+| POST | `/admin/login` | Public | `{ identifier, password }` (identifier = email or mobile); only existing admin accounts can sign in |
+| GET | `/admin/users` | Admin | Search by email, mobile, or role |
+| GET | `/admin/businesses` | Admin | Search by name, category, city, contact, or slug; optional `status` filter |
+| PATCH | `/admin/businesses/:id` | Admin | Update only `{ status }`, `{ verified }`, or both |
+
+Admin login issues a JWT only when the matching account already has `role: "admin"`;
+do not make a public registration path assign the admin role. The admin app uses
+`POST /admin/login` and stores the returned JWT for protected admin API requests.
+For local development, the admin app runs on `http://localhost:5174` and reads its API base
+URL from `admin/.env` (`VITE_API_URL=http://localhost:5000/api/v1`). In production, set
+`VITE_API_URL` to the deployed API base and include the admin app's origin in backend `CLIENT_URL`
+or `FRONTEND_URL` (comma-separated values are supported). The main frontend's login page links
+to the admin app; set its `VITE_ADMIN_URL` to the deployed admin app URL (defaults to
+`http://localhost:5174` during local development and `/admin` in production).
+
+To promote an existing account to administrator, set its email in `backend/.env` and run the
+bootstrap command. The existing account's mobile and password are left unchanged:
+
+```env
+ADMIN_EMAIL=admin@example.com
+```
+
+```bash
+cd backend
+npm run admin:create
+```
+
+If no account matches `ADMIN_EMAIL`, the command can create a new one when `ADMIN_MOBILE` and
+`ADMIN_PASSWORD` (at least 12 characters) are also set. The password is hashed using the normal
+user model hook, and an already-used mobile is rejected. After setup, remove any `ADMIN_*` values
+from `backend/.env`. Existing account passwords are left unchanged by default. To explicitly set
+the existing administrator's password to `ADMIN_PASSWORD`, run:
+
+```bash
+cd backend
+npm run admin:create -- --reset-password
+```
+
+The reset option requires a password of at least 12 characters and uses the normal user model
+password-hashing hook. Then remove the `ADMIN_*` values from `backend/.env` and sign in with the
+account's email and new password. This bootstrap is a local CLI command; it does not add a public
+admin registration API.
 
 ## Frontend integration notes
 

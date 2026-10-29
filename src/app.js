@@ -10,6 +10,7 @@ const businessRoutes = require('./routes/business.routes');
 const categoryRoutes = require('./routes/category.routes');
 const paymentRoutes = require('./routes/payment.routes');
 const userRoutes = require('./routes/user.routes');
+const adminRoutes = require('./routes/admin.routes');
 const { notFound, errorHandler } = require('./middleware/error.middleware');
 
 const app = express();
@@ -22,7 +23,9 @@ app.use(helmet({ crossOriginResourcePolicy: false }));
 
 const allowedOrigins = [
   ...(process.env.CLIENT_URL || '').split(','),
+  ...(process.env.FRONTEND_URL || '').split(','),
   'http://localhost:5173',
+  'http://localhost:5174',
   'https://zyphoriz.com',
   'https://www.zyphoriz.com',
   'https://zyphoriz.in',
@@ -58,6 +61,12 @@ const authLimiter = rateLimit({
   legacyHeaders: false,
 });
 app.use('/api/v1/auth', authLimiter);
+app.use('/api/v1/admin/login', rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 50,
+  standardHeaders: true,
+  legacyHeaders: false,
+}));
 
 // ── Health check ─────────────────────────────────────────────────────────
 app.get('/api/v1/health', (req, res) => res.json({ success: true, message: 'zyphoriz API is running' }));
@@ -68,6 +77,7 @@ app.use('/api/v1/businesses', businessRoutes);
 app.use('/api/v1/categories', categoryRoutes);
 app.use('/api/v1/payments', paymentRoutes);
 app.use('/api/v1/users', userRoutes);
+app.use('/api/v1/admin', adminRoutes);
 
 // ── 404 + error handling ─────────────────────────────────────────────────
 app.use(notFound);
