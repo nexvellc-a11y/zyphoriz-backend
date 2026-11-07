@@ -1,6 +1,7 @@
 const asyncHandler = require('express-async-handler');
 const Business = require('../models/Business');
 const User = require('../models/User');
+const Payment = require('../models/Payment');
 const ApiError = require('../utils/ApiError');
 const sendResponse = require('../utils/apiResponse');
 const { sendTokenResponse } = require('../utils/generateToken');
@@ -73,6 +74,81 @@ const getAdminUsers = asyncHandler(async (req, res) => {
   sendResponse(res, 200, {
     users,
     pagination: { total, page, limit, pages: Math.ceil(total / limit) },
+  });
+});
+
+const getAdminOverview = asyncHandler(async (req, res) => {
+  const today = new Date();
+  today.setUTCHours(0, 0, 0, 0);
+
+  const trendStart = new Date(today);
+  trendStart.setUTCDate(trendStart.getUTCDate() - 6);
+
+  const previousWeekStart = new Date(trendStart);
+  previousWeekStart.setUTCDate(previousWeekStart.getUTCDate() - 7);
+
+  const tomorrow = new Date(today);
+  tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+
+  const [businessCount, userCount, revenueResult, statusCounts, trendCounts, recentBusinesses] =
+    await Promise.all([
+      Business.countDocuments(),
+      User.countDocuments({ role: 'user' }),
+      Payment.aggregate([
+        { $match: { status: 'success' } },
+        { $group: { _id: '$currency', total: { $sum: '$amount' } } },
+      ]),
+      Business.aggregate([
+        { $group: { _id: '$status', count: { $sum: 1 } } },
+      ]),
+      Business.aggregate([
+        { $match: { createdAt: { $gte: previousWeekStart, $lt: tomorrow } } },
+        {
+          $group: {
+            _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt', timezone: 'UTC' } },
+            count: { $sum: 1 },
+          },
+        },
+        { $sort: { _id: 1 } },
+      ]),
+      Business.find()
+        .select('name category city status createdAt owner')
+        .populate('owner', 'email mobile')
+        .sort({ createdAt: -1 })
+        .limit(5)
+        .lean(),
+    ]);
+
+  const trendByDate = new Map(trendCounts.map((entry) => [entry._id, entry.count]));
+  const businessTrend = Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(trendStart);
+    date.setUTCDate(date.getUTCDate() + index);
+    const key = date.toISOString().slice(0, 10);
+    return { date: key, count: trendByDate.get(key) || 0 };
+  });
+
+  const businessesThisWeek = businessTrend.reduce((total, day) => total + day.count, 0);
+  const businessesPreviousWeek = trendCounts.reduce(
+    (total, day) => (day._id < trendStart.toISOString().slice(0, 10) ? total + day.count : total),
+    0
+  );
+  const businessStatuses = { active: 0, pending_payment: 0, expired: 0 };
+  statusCounts.forEach(({ _id, count }) => {
+    if (Object.hasOwn(businessStatuses, _id)) businessStatuses[_id] = count;
+  });
+
+  sendResponse(res, 200, {
+    stats: {
+      businesses: businessCount,
+      users: userCount,
+      revenue: revenueResult.map(({ _id, total }) => ({ currency: _id || 'INR', total })),
+      pendingBusinesses: businessStatuses.pending_payment,
+    },
+    businessTrend,
+    businessesThisWeek,
+    businessesPreviousWeek,
+    businessStatuses,
+    recentBusinesses,
   });
 });
 
@@ -149,4 +225,10 @@ const updateAdminBusiness = asyncHandler(async (req, res) => {
   sendResponse(res, 200, { business }, 'Business updated successfully');
 });
 
-module.exports = { adminLogin, getAdminBusinesses, getAdminUsers, updateAdminBusiness };
+module.exports = {
+  adminLogin,
+  getAdminOverview,
+  getAdminBusinesses,
+  getAdminUsers,
+  updateAdminBusiness,
+};

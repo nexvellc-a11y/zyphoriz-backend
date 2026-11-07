@@ -265,9 +265,82 @@ const getMyPayments = asyncHandler(async (req, res) => {
   sendResponse(res, 200, { payments });
 });
 
+
+
+const getAllPayments = asyncHandler(async (req, res) => {
+  const {
+    page = 1,
+    limit = 10,
+    status,
+    search,
+  } = req.query;
+
+  const pageNum = Math.max(Number(page) || 1, 1);
+  const limitNum = Math.min(Math.max(Number(limit) || 10, 1), 100);
+
+  const filter = {};
+
+  if (status && ['pending', 'success', 'failed'].includes(status)) {
+    filter.status = status;
+  }
+
+  // Fetch payments with business and user details
+  let payments = await Payment.find(filter)
+    .populate('user', 'name email phone')
+    .populate(
+      'business',
+      'name slug status verified selectedPlan planExpiresAt'
+    )
+    .sort({ createdAt: -1 });
+
+  // Optional search
+  if (search) {
+    const searchText = search.toLowerCase();
+
+    payments = payments.filter((payment) => {
+      const user = payment.user;
+      const business = payment.business;
+
+      return (
+        payment.transactionId?.toLowerCase().includes(searchText) ||
+        payment.razorpayOrderId?.toLowerCase().includes(searchText) ||
+        payment.razorpayPaymentId?.toLowerCase().includes(searchText) ||
+        user?.name?.toLowerCase().includes(searchText) ||
+        user?.email?.toLowerCase().includes(searchText) ||
+        business?.name?.toLowerCase().includes(searchText)
+      );
+    });
+  }
+
+  const total = payments.length;
+
+  const paginatedPayments = payments.slice(
+    (pageNum - 1) * limitNum,
+    pageNum * limitNum
+  );
+
+  sendResponse(
+    res,
+    200,
+    {
+      payments: paginatedPayments,
+      pagination: {
+        total,
+        page: pageNum,
+        limit: limitNum,
+        totalPages: Math.ceil(total / limitNum),
+      },
+    },
+    'All payments retrieved successfully'
+  );
+});
+
+
 module.exports = {
   getPaymentPrice,
   createOrder,
   checkout,
   getMyPayments,
+    getAllPayments,
+
 };
