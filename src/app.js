@@ -24,6 +24,7 @@ app.use(helmet({ crossOriginResourcePolicy: false }));
 const allowedOrigins = [
   ...(process.env.CLIENT_URL || '').split(','),
   ...(process.env.FRONTEND_URL || '').split(','),
+    ...(process.env.ADMIN_URL || '').split(','),
   'http://localhost:5173',
   'http://localhost:5174',
   'https://zyphoriz.com',
