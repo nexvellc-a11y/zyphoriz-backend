@@ -30,6 +30,8 @@ const allowedOrigins = [
   'https://www.zyphoriz.com',
   'https://zyphoriz.in',
   'https://www.zyphoriz.in',
+  'https://admin.zyphoriz.com/',
+  'https://www.admin.zyphoriz.com'
 ]
   .map((origin) => origin.trim())
   .filter(Boolean);
